@@ -202,7 +202,7 @@ class RegisterViewController: UIViewController {
         
         // Firebase login
         
-        DatabaseManager.shared.userExists(with: email, completion: {[weak self] exists in
+        DatabaseManager.shared.userExists(with: email, completion: {[weak self]  exists in
             guard let strongSelf = self else {
                 return
             }
@@ -214,14 +214,12 @@ class RegisterViewController: UIViewController {
             
             // user does not exist? create user
             
-            FirebaseAuth.Auth.auth().createUser(withEmail: email, password: password, completion: {[weak self] authResult, error in
-                guard let strongSelf = self else {
-                    return
-                }
+            FirebaseAuth.Auth.auth().createUser(withEmail: email, password: password, completion: {authResult, error in
                 guard authResult != nil, error == nil else {
                     print("Error creating user")
                     return
                 }
+                
                 DatabaseManager.shared.insertUser(with: ChatAppUser(firstName: firstName,
                                                                     lastName: lastName,
                                                                     emailAddress: email))

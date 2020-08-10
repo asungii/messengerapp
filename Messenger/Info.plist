@@ -63,6 +63,8 @@
 	<string>Please allow access to take a profile picture.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Please allow access to use a profile picture.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Please allow access to take a video.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

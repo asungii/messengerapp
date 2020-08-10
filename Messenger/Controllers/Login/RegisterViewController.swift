@@ -8,9 +8,12 @@
 
 import UIKit
 import FirebaseAuth
+import JGProgressHUD
 
-class RegisterViewController: UIViewController {
+final class RegisterViewController: UIViewController {
     
+    private let spinner = JGProgressHUD(style: .dark)
+
     private let scrollView: UIScrollView = {
         let scrollView = UIScrollView()
         scrollView.clipsToBounds = true
@@ -41,7 +44,7 @@ class RegisterViewController: UIViewController {
                                               width: 5,
                                               height: 0))
         field.leftViewMode = .always
-        field.backgroundColor = .white
+        field.backgroundColor = .secondarySystemBackground
         return field
     }()
     
@@ -59,7 +62,7 @@ class RegisterViewController: UIViewController {
                                               width: 5,
                                               height: 0))
         field.leftViewMode = .always
-        field.backgroundColor = .white
+        field.backgroundColor = .secondarySystemBackground
         return field
     }()
     
@@ -77,7 +80,7 @@ class RegisterViewController: UIViewController {
                                               width: 5,
                                               height: 0))
         field.leftViewMode = .always
-        field.backgroundColor = .white
+        field.backgroundColor = .secondarySystemBackground
         return field
     }()
     
@@ -95,7 +98,7 @@ class RegisterViewController: UIViewController {
                                               width: 5,
                                               height: 0))
         field.leftViewMode = .always
-        field.backgroundColor = .white
+        field.backgroundColor = .secondarySystemBackground
         field.isSecureTextEntry = true
         return field
     }()
@@ -115,12 +118,9 @@ class RegisterViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .white
+        view.backgroundColor = .systemBackground
         title = "Log In"
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Register",
-                                                            style: .done,
-                                                            target: self,
-                                                            action: #selector(didTapRegister))
+        navigationItem.rightBarButtonItem = nil
         
         registerButton.addTarget(self,
                                  action: #selector(registerButtonTapped),
@@ -200,12 +200,19 @@ class RegisterViewController: UIViewController {
                 return
         }
         
+        spinner.show(in: view)
+        
         // Firebase login
         
         DatabaseManager.shared.userExists(with: email, completion: {[weak self]  exists in
             guard let strongSelf = self else {
                 return
             }
+            
+            DispatchQueue.main.async {
+                strongSelf.spinner.dismiss()
+            }
+            
             guard !exists else {
                 // case that user exists
                 strongSelf.alertUserLoginError(message: "A user already exists with that email.")
@@ -220,9 +227,31 @@ class RegisterViewController: UIViewController {
                     return
                 }
                 
-                DatabaseManager.shared.insertUser(with: ChatAppUser(firstName: firstName,
-                                                                    lastName: lastName,
-                                                                    emailAddress: email))
+                UserDefaults.standard.setValue(email, forKey: "email")
+                UserDefaults.standard.setValue("\(firstName) \(lastName)", forKey: "name")
+                
+                let chatUser = ChatAppUser(firstName: firstName,
+                                           lastName: lastName,
+                                           emailAddress: email)
+                DatabaseManager.shared.insertUser(with: chatUser, completion: {success in
+                    if success {
+                        // upload image
+                        guard let image = strongSelf.imageView.image,
+                            let data = image.pngData() else {
+                            return
+                        }
+                        let fileName = chatUser.profilePictureFileName
+                        StorageManager.shared.uploadProfilePicture(with: data, fileName: fileName, completion: {result in
+                            switch result {
+                            case .success(let downloadUrl):
+                                UserDefaults.standard.set(downloadUrl, forKey: "profile_picture_url")
+                                print(downloadUrl)
+                            case .failure(let error):
+                                print("Storage manager error - \(error)")
+                            }
+                        })
+                    }
+                })
                 strongSelf.navigationController?.dismiss(animated: true, completion: nil)
                 
                 
@@ -305,7 +334,7 @@ extension RegisterViewController: UIImagePickerControllerDelegate, UINavigationC
         guard let selectedImage = info[UIImagePickerController.InfoKey.editedImage] as? UIImage else {
             return
         }
-        self.imageView.image = selectedImage
+        imageView.image = selectedImage
     }
     func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
         picker.dismiss(animated: true, completion: nil)

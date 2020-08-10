@@ -10,8 +10,11 @@ import UIKit
 import FirebaseAuth
 import FBSDKLoginKit
 import GoogleSignIn
+import JGProgressHUD
 
-class LoginViewController: UIViewController {
+final class LoginViewController: UIViewController {
+    
+    private let spinner = JGProgressHUD(style: .dark)
     
     private let scrollView: UIScrollView = {
         let scrollView = UIScrollView()
@@ -40,7 +43,7 @@ class LoginViewController: UIViewController {
                                               width: 5,
                                               height: 0))
         field.leftViewMode = .always
-        field.backgroundColor = .white
+        field.backgroundColor = .secondarySystemBackground
         return field
     }()
     
@@ -58,7 +61,7 @@ class LoginViewController: UIViewController {
                                               width: 5,
                                               height: 0))
         field.leftViewMode = .always
-        field.backgroundColor = .white
+        field.backgroundColor = .secondarySystemBackground
         field.isSecureTextEntry = true
         return field
     }()
@@ -98,7 +101,7 @@ class LoginViewController: UIViewController {
         
         GIDSignIn.sharedInstance()?.presentingViewController = self
         
-        view.backgroundColor = .white
+        view.backgroundColor = .systemBackground
         title = "Log In"
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Register",
                                                             style: .done,
@@ -121,7 +124,15 @@ class LoginViewController: UIViewController {
         scrollView.addSubview(loginButton)
         scrollView.addSubview(facebookLoginButton)
         scrollView.addSubview(googleLoginButton)
+        let button = UIButton(type: .roundedRect)
+        button.frame = CGRect(x: 20, y: 50, width: 100, height: 30)
+        button.setTitle("Crash", for: [])
+        button.addTarget(self, action: #selector(self.crashButtonTapped(_:)), for: .touchUpInside)
+        scrollView.addSubview(button)
 
+    }
+    @IBAction func crashButtonTapped(_ sender: AnyObject) {
+        fatalError()
     }
     deinit {
         if let observer = loginObserver {
@@ -164,6 +175,8 @@ class LoginViewController: UIViewController {
 
     }
     
+    
+    
     @objc private func loginButtonTapped() {
         
         emailField.resignFirstResponder()
@@ -178,11 +191,17 @@ class LoginViewController: UIViewController {
                 return
         }
         
+        spinner.show(in: view)
+        
         // Firebase login
         FirebaseAuth.Auth.auth().signIn(withEmail: email, password: password, completion: {[weak self] authResult, error in
             
             guard let strongSelf = self else {
                 return
+            }
+            
+            DispatchQueue.main.async {
+                strongSelf.spinner.dismiss()
             }
             
             guard let result = authResult, error == nil else {
@@ -191,6 +210,22 @@ class LoginViewController: UIViewController {
             }
             
             let user = result.user
+            
+            let safeEmail = DatabaseManager.safeEmail(emailAddress: email)
+            DatabaseManager.shared.getDataFor(path: safeEmail, completion: {[weak self] result in
+                switch result {
+                case .success(let data):
+                    guard let userData = data as? [String: Any], let firstName = userData["first_name"] as? String, let lastName = userData["last_name"] as? String else {
+                        return
+                    }
+                    UserDefaults.standard.set("\(firstName) \(lastName)", forKey: "name")
+
+                case .failure(let error):
+                    print("Failed to read data with error - \(error)")
+                }
+            })
+            
+            UserDefaults.standard.set(email, forKey: "email")
             print("Logged In User: \(user)")
             strongSelf.navigationController?.dismiss(animated: true, completion: nil)
             
@@ -214,6 +249,7 @@ class LoginViewController: UIViewController {
         // first parameter is where the page goes after pushing the button?
         navigationController?.pushViewController(vc, animated: true)
     }
+    
     
 }
 
@@ -242,7 +278,7 @@ extension LoginViewController: LoginButtonDelegate {
         }
         
         let facebookRequest = FBSDKLoginKit.GraphRequest(graphPath: "me",
-                                                         parameters: ["fields": "email, name"],
+                                                         parameters: ["fields": "email, first_name, last_name, picture.type(large)"],
                                                          tokenString: token,
                                                          version: nil,
                                                          httpMethod: .get)
@@ -254,26 +290,53 @@ extension LoginViewController: LoginButtonDelegate {
                 return
             }
             
-            guard let userName = result["name"] as? String,
-                let email = result["email"] as? String else {
+            print(result)
+                        
+            guard let firstName = result["first_name"] as? String,
+                let lastName = result["last_name"] as? String,
+                let email = result["email"] as? String,
+                let picture = result["picture"] as? [String: Any],
+                let data = picture["data"] as? [String: Any],
+                let pictureUrl = data["url"] as? String else {
                     print("Failed to get email and name from Facebook result")
                     return
-                    
-                    // The issue: not getting email and name from FB result, which is dictionary
             }
             
-            let nameComponents = userName.components(separatedBy: " ")
-            guard nameComponents.count == 2 else {
-                return
-            }
-            
-            let firstName = nameComponents[0]
-            let lastName = nameComponents[1]
+            UserDefaults.standard.set(email, forKey:"email")
+            UserDefaults.standard.set("\(firstName) \(lastName)", forKey:"name")
             
             DatabaseManager.shared.userExists(with: email, completion: {exists in
                 if !exists {
-                    DatabaseManager.shared.insertUser(with: ChatAppUser(firstName: firstName,
-                                                                        lastName: lastName,     emailAddress: email))
+                    let chatUser = ChatAppUser(firstName: firstName,
+                                               lastName: lastName,
+                                               emailAddress: email)
+                    DatabaseManager.shared.insertUser(with: chatUser, completion: {success in
+                        if success {
+                            guard let url = URL(string: pictureUrl) else {
+                                return
+                            }
+                            print("Downloading data from FB image")
+                          
+                            URLSession.shared.dataTask(with: url, completionHandler: {data, _, _ in
+                                guard let data = data else {
+                                    print("Failed to get data from FB image")
+                                    return
+                                }
+                                
+                                print("Downloaded data from FB image")
+                                let fileName = chatUser.profilePictureFileName
+                                StorageManager.shared.uploadProfilePicture(with: data, fileName: fileName, completion: {result in
+                                    switch result {
+                                    case .success(let downloadUrl):
+                                        UserDefaults.standard.set(downloadUrl, forKey: "profile_picture_url")
+                                        print(downloadUrl)
+                                    case .failure(let error):
+                                        print("Storage manager error - \(error)")
+                                    }
+                                })
+                            }).resume()
+                        }
+                    })
                 }
             })
             
